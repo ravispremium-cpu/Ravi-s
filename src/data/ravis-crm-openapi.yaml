@@ -1,0 +1,1938 @@
+openapi: 3.1.0
+info:
+  title: Ravis CRM - REST API & Webhooks
+  version: 1.0.0
+  description: |
+    API RESTful e Webhooks de alto desempenho para o ecossistema **Ravi's Premium Menswear** (Canoinhas - SC).
+    
+    Projetada para suportar:
+    - **Curadoria & Malas Condicionais (Mala em Casa)**: Reserva atômica de peças, tracking de prova, devolução e faturamento.
+    - **Gestão de Clientes & StyleProfile 360°**: Tamanhos (camisa, calça, sapato), caimento, cores faturadas e restrições.
+    - **Catálogo & Estoque com Unidades Limitadas**: Estoque por SKU/Grade com reserva durante condicional e baixa em venda.
+    - **Pedidos Omnichannel & PDV Canoinhas**: Vendas WhatsApp e balcão com vínculo de atendente e cálculo de comissão.
+    - **Inbox Unificado & Mensageria Multicanal**: WhatsApp (Evolution API / Baileys / Cloud API), Instagram Direct e E-mail.
+    - **Motor de Automações & Campanhas**: Disparos inteligentes com respeito ao horário comercial e consentimento LGPD.
+    - **Analytics & BI em Tempo Real**: Conversão de condicionais, ticket médio, LTV e taxa de conversão por curador.
+
+  contact:
+    name: Ravi's Engineering Team
+    email: dev@ravispremium.com.br
+    url: https://ravispremium.com.br
+  license:
+    name: Proprietary - Ravi's Premium Menswear
+
+servers:
+  - url: https://api.ravispremium.com.br/v1
+    description: Servidor de Produção (Região sa-east-1 / São Paulo)
+  - url: https://sandbox-api.ravispremium.com.br/v1
+    description: Ambiente de Staging / Homologação
+  - url: http://localhost:3000/api/v1
+    description: Ambiente de Desenvolvimento Local
+
+security:
+  - BearerAuth: []
+  - SessionCookieAuth: []
+
+tags:
+  - name: Auth & Sessions
+    description: Autenticação JWT e gerenciamento de sessões NextAuth.js / RBAC
+  - name: Customers & Style Profile
+    description: Gestão 360° de clientes VIP, perfil de moda masculina, medidas e segmentação
+  - name: Products & Variants
+    description: Catálogo Pomelli Photoshoot, grade de tamanhos, custo, preço e controle Kardex
+  - name: Conditional Boxes
+    description: Ciclo de vida da Mala Condicional (Criação, Reserva, Envio, Devolução e Faturamento)
+  - name: Orders & Checkout
+    description: Pedidos de venda (Online WhatsApp & PDV Canoinhas), pagamentos Pix / Cartão e comissões
+  - name: Conversations & Inbox
+    description: Inbox multicanal unificado (WhatsApp, Instagram Direct, E-mail)
+  - name: Automations & Campaigns
+    description: Disparos segmentados, réguas de automação e controle LGPD / horário comercial
+  - name: Analytics & BI
+    description: Métricas financeiras, taxa de conversão de condicional, LTV e tempo de atendimento
+  - name: Inbound Webhooks
+    description: Webhooks recebidos da Evolution API (WhatsApp), Graph API (Instagram) e Mercado Pago/Stripe
+  - name: Outbound Webhooks
+    description: Notificações em tempo real enviadas para sistemas de logística e mensageria externa
+
+paths:
+  # ============================================================================
+  # 1. AUTH & SESSIONS
+  # ============================================================================
+  /auth/login:
+    post:
+      tags: [Auth & Sessions]
+      summary: Autenticar usuário e emitir token JWT
+      description: Realiza login para ADMIN, CURADOR ou ATENDENTE com suporte a refresh token e RBAC.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, password]
+              properties:
+                email:
+                  type: string
+                  format: email
+                  example: mateus.curador@ravispremium.com.br
+                password:
+                  type: string
+                  format: password
+                  example: "SenhaForte#2026"
+      responses:
+        '200':
+          description: Autenticado com sucesso
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  accessToken:
+                    type: string
+                    example: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+                  refreshToken:
+                    type: string
+                    example: "dGhpcy1pcy1hLXJlZnJlc2gtdG9rZW4..."
+                  expiresIn:
+                    type: integer
+                    example: 86400
+                  user:
+                    $ref: '#/components/schemas/UserResponse'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+
+  /auth/me:
+    get:
+      tags: [Auth & Sessions]
+      summary: Obter perfil do usuário autenticado
+      description: Retorna os dados do usuário, permissões RBAC e loja vinculada.
+      responses:
+        '200':
+          description: Perfil do usuário atual
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserResponse'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+
+  # ============================================================================
+  # 2. CUSTOMERS & STYLE PROFILE
+  # ============================================================================
+  /customers:
+    get:
+      tags: [Customers & Style Profile]
+      summary: Listar clientes com filtros avançados e paginação
+      description: Permite buscar clientes por nome, telefone, @instagram, tags de segmentação, tamanho e status LGPD.
+      parameters:
+        - $ref: '#/components/parameters/PageQuery'
+        - $ref: '#/components/parameters/LimitQuery'
+        - name: search
+          in: query
+          description: Termo de busca em nome, e-mail, telefone ou @instagram
+          schema:
+            type: string
+            example: "Guilherme"
+        - name: tags
+          in: query
+          description: Lista de tags separadas por vírgula (ex: VIP_PLATINUM,MEDICO)
+          schema:
+            type: string
+            example: "VIP_PLATINUM,LINHO"
+        - name: shirtSize
+          in: query
+          schema:
+            type: string
+            enum: [PP, P, M, G, GG, XG]
+            example: M
+        - name: pantSize
+          in: query
+          schema:
+            type: integer
+            example: 42
+        - name: lgpdConsent
+          in: query
+          schema:
+            type: string
+            enum: [OPT_IN, PENDENTE, OPT_OUT]
+      responses:
+        '200':
+          description: Lista paginada de clientes
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/CustomerDetail'
+                  pagination:
+                    $ref: '#/components/schemas/PaginationMeta'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+
+    post:
+      tags: [Customers & Style Profile]
+      summary: Cadastrar novo cliente com StyleProfile integrado
+      description: Cria cliente e seu perfil de estilo, validando unicidade de telefone e regras de LGPD.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateCustomerRequest'
+      responses:
+        '201':
+          description: Cliente criado com sucesso
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CustomerDetail'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '409':
+          $ref: '#/components/responses/ConflictError'
+
+  /customers/{id}:
+    get:
+      tags: [Customers & Style Profile]
+      summary: Obter detalhes 360° do cliente
+      description: Retorna dados cadastrais, StyleProfile, histórico de compras, condicionais ativas e timeline.
+      parameters:
+        - $ref: '#/components/parameters/IdPath'
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CustomerDetail'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+
+    put:
+      tags: [Customers & Style Profile]
+      summary: Atualizar dados e perfil de estilo do cliente
+      parameters:
+        - $ref: '#/components/parameters/IdPath'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateCustomerRequest'
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CustomerDetail'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+
+    delete:
+      tags: [Customers & Style Profile]
+      summary: Soft-delete de cliente (LGPD ou inativação)
+      parameters:
+        - $ref: '#/components/parameters/IdPath'
+      responses:
+        '204':
+          description: Cliente inativado com sucesso (soft-delete gravando deletedAt)
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+
+  /customers/segmentation:
+    post:
+      tags: [Customers & Style Profile]
+      summary: Consulta avançada de segmentação para campanhas e curadoria
+      description: Segmenta base por combinação booleana de tamanho, peças compradas, dias sem comprar, ticket médio e tags.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                sizes:
+                  type: array
+                  items:
+                    type: string
+                  example: ["M", "42"]
+                fitPreferences:
+                  type: array
+                  items:
+                    type: string
+                  example: ["SLIM_FIT", "ALFAIATARIA_MODERNA"]
+                daysInactiveMin:
+                  type: integer
+                  example: 60
+                tagsInclude:
+                  type: array
+                  items:
+                    type: string
+                  example: ["VIP_PLATINUM", "PREFERENCIA_LINHO"]
+                tagsExclude:
+                  type: array
+                  items:
+                    type: string
+                  example: ["INADIMPLENTE"]
+                lgpdOnlyOptIn:
+                  type: boolean
+                  default: true
+      responses:
+        '200':
+          description: Contagem e lista de clientes compatíveis com a segmentação
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  matchedCount:
+                    type: integer
+                    example: 24
+                  customers:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/CustomerSummary'
+
+  # ============================================================================
+  # 3. PRODUCTS & VARIANTS (ESTOQUE & KARDEX)
+  # ============================================================================
+  /products:
+    get:
+      tags: [Products & Variants]
+      summary: Listar produtos e catálogo Pomelli Photoshoot
+      parameters:
+        - $ref: '#/components/parameters/PageQuery'
+        - $ref: '#/components/parameters/LimitQuery'
+        - name: category
+          in: query
+          schema:
+            type: string
+            enum: [CAMISETA_SLIM, CAMISETA_LONGLINE, TRICO, SOBRETUDO, CACHECOL, CALCA, CAMISA_LINHO, BLAZER, ACESSORIOS]
+        - name: inStockOnly
+          in: query
+          schema:
+            type: boolean
+            default: false
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/ProductDetail'
+                  pagination:
+                    $ref: '#/components/schemas/PaginationMeta'
+
+    post:
+      tags: [Products & Variants]
+      summary: Criar novo produto com variantes de tamanho/cor e unidades limitadas
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateProductRequest'
+      responses:
+        '201':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProductDetail'
+
+  /products/{id}:
+    get:
+      tags: [Products & Variants]
+      summary: Obter produto específico com todas as variantes e fotos
+      parameters:
+        - $ref: '#/components/parameters/IdPath'
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProductDetail'
+
+  /variants/{id}/inventory:
+    patch:
+      tags: [Products & Variants]
+      summary: Ajuste manual ou movimentação de estoque físico de uma variante
+      description: Lança movimento Kardex com tipo de movimentação e recalcula unidades disponíveis.
+      parameters:
+        - $ref: '#/components/parameters/IdPath'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [quantityChange, movementType, reason]
+              properties:
+                quantityChange:
+                  type: integer
+                  example: 2
+                  description: Quantidade positiva (entrada) ou negativa (saída)
+                movementType:
+                  type: string
+                  enum: [ENTRADA, SAIDA_VENDA, RESERVA_CONDICIONAL, LIBERACAO_CONDICIONAL, AJUSTE_BALANCO, DEVOLUCAO]
+                  example: ENTRADA
+                reason:
+                  type: string
+                  example: "Recebimento lote de inverno Pomelli 2026"
+      responses:
+        '200':
+          description: Estoque atualizado com movimento Kardex registrado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProductVariantDetail'
+
+  # ============================================================================
+  # 4. CONDITIONAL BOXES (MALA CONDICIONAL & AÇÃO DO CURADOR)
+  # ============================================================================
+  /conditional-boxes:
+    get:
+      tags: [Conditional Boxes]
+      summary: Listar malas condicionais por status e período
+      parameters:
+        - $ref: '#/components/parameters/PageQuery'
+        - $ref: '#/components/parameters/LimitQuery'
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [CRIADO, EM_PREPARACAO, ENVIADO, EM_TESTE, FINALIZADO, CANCELADO, VENCIDO]
+        - name: curatorId
+          in: query
+          schema:
+            type: string
+            format: uuid
+        - name: customerId
+          in: query
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/ConditionalBoxDetail'
+                  pagination:
+                    $ref: '#/components/schemas/PaginationMeta'
+
+    post:
+      tags: [Conditional Boxes]
+      summary: Criar mala condicional vazia para um cliente
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [customerId, curatorId]
+              properties:
+                customerId:
+                  type: string
+                  format: uuid
+                curatorId:
+                  type: string
+                  format: uuid
+                deliveryMethod:
+                  type: string
+                  enum: [LEVA_E_TRAZ_VIP, RETIRADA_LOJA, CORREIOS_SEDEX]
+                  default: LEVA_E_TRAZ_VIP
+                notes:
+                  type: string
+                  example: "Seleção para evento de posse OAB Canoinhas"
+      responses:
+        '201':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConditionalBoxDetail'
+
+  /conditional-boxes/{id}/assemble-and-send:
+    post:
+      tags: [Conditional Boxes]
+      summary: Montar seleção e enviar para o cliente (Ação Mais Frequente do Curador)
+      description: |
+        **Fluxo Central de Curadoria da Ravi's:**
+        1. Valida se os tamanhos das peças são compatíveis com o `StyleProfile` do cliente;
+        2. Executa bloqueio pessimista e **reserva atômica de estoque** por SKU;
+        3. Adiciona os itens à mala condicional calculando valor total em R$;
+        4. Transaciona o status para `ENVIADO` ou `EM_TESTE`;
+        5. Gera link de tracking VIP e mensagem personalizada pré-formatada para WhatsApp;
+        6. Opcionalmente dispara mensagem direta via Evolution API;
+        7. Enfileira agendador de lembrete D+3 no BullMQ.
+      parameters:
+        - $ref: '#/components/parameters/IdPath'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AssembleAndSendRequest'
+      responses:
+        '200':
+          description: Seleção montada, peças reservadas no estoque e despacho registrado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AssembleAndSendResponse'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '409':
+          description: Conflito de estoque (peça esgotada ou reservada para outro cliente)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+
+  /conditional-boxes/{id}/status:
+    patch:
+      tags: [Conditional Boxes]
+      summary: Atualizar status do ciclo de vida da mala condicional
+      parameters:
+        - $ref: '#/components/parameters/IdPath'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [status]
+              properties:
+                status:
+                  type: string
+                  enum: [CRIADO, EM_PREPARACAO, ENVIADO, EM_TESTE, FINALIZADO, CANCELADO, VENCIDO]
+                notes:
+                  type: string
+                  example: "Motorista VIP entregou na clínica às 14:30"
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConditionalBoxDetail'
+
+  /conditional-boxes/{id}/return:
+    post:
+      tags: [Conditional Boxes]
+      summary: Registrar devolução, peças retidas/compradas e fechamento da mala
+      description: |
+        Processa as decisões finais das peças experimentadas pelo cliente:
+        - Peças com status `COMPRADO`: Gera automaticamente Pedido de Venda (`Order`), comissão do curador e fatura Pix/Cartão.
+        - Peças com status `DEVOLVIDO`: Libera imediatamente a reserva do estoque físico e registra motivo de recusa (ex: "Ficou largo na cintura") para refinar a IA do StyleProfile.
+      parameters:
+        - $ref: '#/components/parameters/IdPath'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RegisterReturnRequest'
+      responses:
+        '200':
+          description: Devolução e fechamento processados com reconciliação de estoque
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RegisterReturnResponse'
+
+  # ============================================================================
+  # 5. ORDERS & CHECKOUT (VENDAS WHATSAPP & PDV CANOINHAS)
+  # ============================================================================
+  /orders:
+    get:
+      tags: [Orders & Checkout]
+      summary: Listar pedidos faturados
+      parameters:
+        - $ref: '#/components/parameters/PageQuery'
+        - $ref: '#/components/parameters/LimitQuery'
+        - name: channel
+          in: query
+          schema:
+            type: string
+            enum: [ONLINE_WHATSAPP, PDV_FISICO_CANOINHAS, ECOMMERCE]
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [PENDENTE, PAGO, EM_SEPARACAO, ENVIADO, ENTREGUE, CANCELADO]
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/OrderDetail'
+                  pagination:
+                    $ref: '#/components/schemas/PaginationMeta'
+
+    post:
+      tags: [Orders & Checkout]
+      summary: Criar novo pedido (Venda Direta PDV ou WhatsApp)
+      description: Cria pedido, dá baixa definitiva no estoque físico e vincula atendente para comissão.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateOrderRequest'
+      responses:
+        '201':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OrderDetail'
+
+  /orders/{id}/payments:
+    post:
+      tags: [Orders & Checkout]
+      summary: Gerar cobrança ou registrar pagamento de um pedido
+      description: Gera link de pagamento Mercado Pago/Stripe ou QR Code Pix dinâmico instantâneo.
+      parameters:
+        - $ref: '#/components/parameters/IdPath'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [method]
+              properties:
+                method:
+                  type: string
+                  enum: [PIX, CARTAO_CREDITO, CARTAO_DEBITO, DINHEIRO, LINK_MERCADO_PAGO, LINK_STRIPE]
+                installments:
+                  type: integer
+                  default: 1
+                  maximum: 10
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaymentResponse'
+
+  # ============================================================================
+  # 6. CONVERSATIONS & INBOX (WHATSAPP, INSTAGRAM, EMAIL)
+  # ============================================================================
+  /conversations:
+    get:
+      tags: [Conversations & Inbox]
+      summary: Listar conversas do inbox unificado com fila de atendimento
+      parameters:
+        - $ref: '#/components/parameters/PageQuery'
+        - $ref: '#/components/parameters/LimitQuery'
+        - name: channel
+          in: query
+          schema:
+            type: string
+            enum: [WHATSAPP, INSTAGRAM, EMAIL]
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [ABERTO, EM_ATENDIMENTO, AGUARDANDO_CLIENTE, RESOLVIDO, ARQUIVADO]
+        - name: assignedToId
+          in: query
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/ConversationDetail'
+                  pagination:
+                    $ref: '#/components/schemas/PaginationMeta'
+
+  /conversations/{id}/messages:
+    get:
+      tags: [Conversations & Inbox]
+      summary: Obter histórico de mensagens de uma conversa
+      parameters:
+        - $ref: '#/components/parameters/IdPath'
+        - $ref: '#/components/parameters/PageQuery'
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  messages:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/MessageDetail'
+
+    post:
+      tags: [Conversations & Inbox]
+      summary: Enviar mensagem para o cliente (WhatsApp / Instagram / Email)
+      description: Dispara mensagem via provedor correspondente (Evolution API para WhatsApp).
+      parameters:
+        - $ref: '#/components/parameters/IdPath'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [content]
+              properties:
+                content:
+                  type: string
+                  example: "Olá Dr. Guilherme! Sua mala de inverno Ravi's foi montada e está a caminho."
+                mediaUrl:
+                  type: string
+                  format: uri
+                  nullable: true
+                scheduledAt:
+                  type: string
+                  format: date-time
+                  nullable: true
+                  description: Opcional para envio agendado em horário comercial
+      responses:
+        '201':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MessageDetail'
+
+  # ============================================================================
+  # 7. AUTOMATIONS & CAMPAIGNS (DISPARO WHATSAPP & LGPD)
+  # ============================================================================
+  /automations:
+    get:
+      tags: [Automations & Campaigns]
+      summary: Listar réguas de automação ativas
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/AutomationRule'
+
+    post:
+      tags: [Automations & Campaigns]
+      summary: Criar ou atualizar régua de automação
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AutomationRule'
+      responses:
+        '201':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AutomationRule'
+
+  /campaigns:
+    get:
+      tags: [Automations & Campaigns]
+      summary: Listar campanhas de disparo WhatsApp / CRM
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/CampaignDetail'
+
+    post:
+      tags: [Automations & Campaigns]
+      summary: Criar campanha segmentada para disparo
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateCampaignRequest'
+      responses:
+        '201':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CampaignDetail'
+
+  /campaigns/{id}/trigger:
+    post:
+      tags: [Automations & Campaigns]
+      summary: Disparar ou enfileirar execução de campanha no WhatsApp
+      description: |
+        Valida:
+        1. Consentimento LGPD (`OPT_IN`);
+        2. Janela de horário comercial (09:00 às 19:00 em Canoinhas/BRT);
+        3. Rate-limit humanizado da Evolution API (intervalo de 15 a 45 segundos entre disparos para prevenir bloqueio).
+      parameters:
+        - $ref: '#/components/parameters/IdPath'
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  campaignId:
+                    type: string
+                    format: uuid
+                  queuedRecipients:
+                    type: integer
+                    example: 38
+                  status:
+                    type: string
+                    example: EM_DISPARO
+
+  # ============================================================================
+  # 8. ANALYTICS & BI (DASHBOARDS DO GESTOR)
+  # ============================================================================
+  /analytics/overview:
+    get:
+      tags: [Analytics & BI]
+      summary: Visão geral de faturamento, ticket médio e conversão de condicionais
+      parameters:
+        - name: startDate
+          in: query
+          schema:
+            type: string
+            format: date
+            example: "2026-10-01"
+        - name: endDate
+          in: query
+          schema:
+            type: string
+            format: date
+            example: "2026-10-12"
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AnalyticsOverviewResponse'
+
+  /analytics/curators:
+    get:
+      tags: [Analytics & BI]
+      summary: Performance detalhada por curador e atendente
+      description: Taxa de conversão de malas, ticket médio faturado, comissões acumuladas e SLA de resposta.
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/CuratorMetric'
+
+  # ============================================================================
+  # 9. INBOUND WEBHOOKS
+  # ============================================================================
+  /webhooks/evolution-api:
+    post:
+      tags: [Inbound Webhooks]
+      summary: Webhook de mensagens WhatsApp recebidas (Evolution API / Baileys)
+      description: Recebe eventos `messages.upsert`, `messages.update` e status de leitura/áudio.
+      security:
+        - WebhookSecretAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EvolutionApiWebhookPayload'
+      responses:
+        '200':
+          description: Evento processado com sucesso
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  received:
+                    type: boolean
+                    example: true
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+
+  /webhooks/instagram-graph:
+    post:
+      tags: [Inbound Webhooks]
+      summary: Webhook de mensagens Instagram Direct (Meta Graph API)
+      description: Recebe DMs de clientes, menções em Stories e respostas de reels.
+      security:
+        - MetaSignatureAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/InstagramWebhookPayload'
+      responses:
+        '200':
+          description: DM registrada no Inbox
+        '403':
+          description: Assinatura Meta inválida
+
+  /webhooks/payments:
+    post:
+      tags: [Inbound Webhooks]
+      summary: Webhook de pagamentos Mercado Pago & Stripe
+      description: Notificação de pagamento Pix aprovado ou transação de cartão confirmada. Atualiza status do pedido e estoque.
+      security:
+        - PaymentGatewaySignatureAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PaymentGatewayWebhookPayload'
+      responses:
+        '200':
+          description: Pedido quitado e estoque confirmado
+
+  # ============================================================================
+  # 10. OUTBOUND WEBHOOKS
+  # ============================================================================
+  /webhooks/outbound/conditional-dispatched:
+    post:
+      tags: [Outbound Webhooks]
+      summary: Notificação de nova mala condicional despachada
+      description: Notifica o serviço de entrega VIP de Canoinhas ou app externo de rastreio.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                event:
+                  type: string
+                  example: "conditional.dispatched"
+                boxId:
+                  type: string
+                  format: uuid
+                customer:
+                  type: object
+                  properties:
+                    name:
+                      type: string
+                    phone:
+                      type: string
+                    address:
+                      type: string
+                piecesCount:
+                  type: integer
+                deadlineDate:
+                  type: string
+                  format: date-time
+      responses:
+        '200':
+          description: Entregador VIP notificado com sucesso
+
+# ==============================================================================
+# COMPONENTS, SCHEMAS, SECURITY & RESPONSES
+# ==============================================================================
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: JWT emitido em /auth/login contendo role (ADMIN, CURADOR, ATENDENTE) e user_id
+    SessionCookieAuth:
+      type: apiKey
+      in: cookie
+      name: next-auth.session-token
+      description: Cookie de sessão seguro emitido pelo NextAuth.js
+    WebhookSecretAuth:
+      type: apiKey
+      in: header
+      name: X-Evolution-Secret
+      description: Token secreto configurado na Evolution API
+    MetaSignatureAuth:
+      type: apiKey
+      in: header
+      name: X-Hub-Signature-256
+      description: HMAC-SHA256 da Graph API do Instagram
+    PaymentGatewaySignatureAuth:
+      type: apiKey
+      in: header
+      name: X-Signature
+      description: Assinatura HMAC de verificação do Mercado Pago / Stripe
+
+  parameters:
+    IdPath:
+      name: id
+      in: path
+      required: true
+      description: Identificador UUIDv4 do recurso
+      schema:
+        type: string
+        format: uuid
+        example: "9b1deb4d-3b7d-4bad-9bdd-2b0d7b3dcb6d"
+    PageQuery:
+      name: page
+      in: query
+      description: Número da página (1-based)
+      schema:
+        type: integer
+        default: 1
+        minimum: 1
+    LimitQuery:
+      name: limit
+      in: query
+      description: Quantidade de itens por página (máx 100)
+      schema:
+        type: integer
+        default: 20
+        maximum: 100
+
+  responses:
+    UnauthorizedError:
+      description: Token JWT ausente, expirado ou sessão inválida
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ProblemDetails'
+    ValidationError:
+      description: Erro de validação de campos nos dados de entrada
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ProblemDetails'
+    ConflictError:
+      description: Conflito de integridade (ex: telefone duplicado ou estoque insuficiente)
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ProblemDetails'
+    NotFoundError:
+      description: Recurso solicitado não foi encontrado
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ProblemDetails'
+
+  schemas:
+    # RFC 7807 Standard Error Problem Details
+    ProblemDetails:
+      type: object
+      required: [type, title, status]
+      properties:
+        type:
+          type: string
+          example: "https://ravispremium.com.br/errors/stock-insufficient"
+        title:
+          type: string
+          example: "Estoque insuficiente para a variante"
+        status:
+          type: integer
+          example: 409
+        detail:
+          type: string
+          example: "A variante 'RAV-SBT-04-P' possui apenas 0 unidades disponíveis em estoque para reserva."
+        instance:
+          type: string
+          example: "/v1/conditional-boxes/9b1deb4d/assemble-and-send"
+        invalidParams:
+          type: array
+          items:
+            type: object
+            properties:
+              name:
+                type: string
+              reason:
+                type: string
+
+    PaginationMeta:
+      type: object
+      properties:
+        total:
+          type: integer
+          example: 124
+        page:
+          type: integer
+          example: 1
+        limit:
+          type: integer
+          example: 20
+        totalPages:
+          type: integer
+          example: 7
+
+    UserResponse:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+          example: "Mateus Curador"
+        email:
+          type: string
+          example: "mateus@ravispremium.com.br"
+        role:
+          type: string
+          enum: [ADMIN, CURADOR, ATENDENTE]
+          example: CURADOR
+        storeLocation:
+          type: string
+          example: "Canoinhas - Matriz"
+
+    CustomerSummary:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        fullName:
+          type: string
+          example: "Dr. Guilherme Schramm"
+        phone:
+          type: string
+          example: "+5547991234567"
+        instagram:
+          type: string
+          example: "@dr.guilherme"
+        tier:
+          type: string
+          example: "VIP_PLATINUM"
+
+    CustomerDetail:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        fullName:
+          type: string
+          example: "Dr. Guilherme Schramm"
+        cpf:
+          type: string
+          example: "123.456.789-00"
+        phone:
+          type: string
+          example: "+5547991234567"
+        email:
+          type: string
+          example: "guilherme.schramm@clinica.com.br"
+        instagram:
+          type: string
+          example: "@dr.guilherme"
+        tier:
+          type: string
+          example: "VIP_PLATINUM"
+        city:
+          type: string
+          example: "Canoinhas"
+        state:
+          type: string
+          example: "SC"
+        lgpdConsentStatus:
+          type: string
+          enum: [OPT_IN, PENDENTE, OPT_OUT]
+          example: OPT_IN
+        styleProfile:
+          $ref: '#/components/schemas/StyleProfileSchema'
+        tags:
+          type: array
+          items:
+            type: string
+          example: ["MEDICO", "ALFAIATARIA", "LINHO_FAN"]
+        ltvTotal:
+          type: number
+          example: 14850.00
+        activeConditionalsCount:
+          type: integer
+          example: 1
+
+    StyleProfileSchema:
+      type: object
+      properties:
+        shirtSize:
+          type: string
+          enum: [PP, P, M, G, GG, XG]
+          example: M
+        pantsSize:
+          type: integer
+          example: 42
+        suitSize:
+          type: integer
+          example: 50
+        shoeSize:
+          type: integer
+          example: 41
+        fitPreference:
+          type: string
+          enum: [SLIM_FIT, REGULAR_FIT, ALFAIATARIA_MODERNA, LONGLINE, OVERSIZED]
+          example: SLIM_FIT
+        preferredColors:
+          type: array
+          items:
+            type: string
+          example: ["Azul Marinho", "Preto", "Tons Terrosos", "Off-White"]
+        avoidColors:
+          type: array
+          items:
+            type: string
+          example: ["Amarelo", "Estampas Florais"]
+        styleKeywords:
+          type: array
+          items:
+            type: string
+          example: ["Old Money", "Minimalista", "Elegante Casual"]
+        notes:
+          type: string
+          example: "Prefere gola careca slim e tecidos naturais (linho puro e algodão egípcio)."
+
+    CreateCustomerRequest:
+      type: object
+      required: [fullName, phone]
+      properties:
+        fullName:
+          type: string
+          example: "Rodrigo Silveira"
+        phone:
+          type: string
+          example: "+5547998877665"
+        email:
+          type: string
+          example: "rodrigo.silveira@agromarcilio.com.br"
+        instagram:
+          type: string
+          example: "@rodrigo.silveira"
+        city:
+          type: string
+          default: "Canoinhas"
+        state:
+          type: string
+          default: "SC"
+        lgpdConsent:
+          type: string
+          enum: [OPT_IN, PENDENTE, OPT_OUT]
+          default: OPT_IN
+        styleProfile:
+          $ref: '#/components/schemas/StyleProfileSchema'
+
+    UpdateCustomerRequest:
+      type: object
+      properties:
+        fullName:
+          type: string
+        phone:
+          type: string
+        instagram:
+          type: string
+        styleProfile:
+          $ref: '#/components/schemas/StyleProfileSchema'
+
+    ProductDetail:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        code:
+          type: string
+          example: "RAV-TRC-03"
+        name:
+          type: string
+          example: "Tricô Modal Canelado Off-White"
+        category:
+          type: string
+          example: "TRICO"
+        costPrice:
+          type: number
+          example: 180.00
+        retailPrice:
+          type: number
+          example: 489.00
+        photos:
+          type: array
+          items:
+            type: string
+            format: uri
+        variants:
+          type: array
+          items:
+            $ref: '#/components/schemas/ProductVariantDetail'
+
+    ProductVariantDetail:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        sku:
+          type: string
+          example: "RAV-TRC-03-M-OFF"
+        size:
+          type: string
+          example: "M"
+        colorName:
+          type: string
+          example: "Off-White"
+        colorHex:
+          type: string
+          example: "#F5F5DC"
+        stockPhysical:
+          type: integer
+          example: 3
+        stockReserved:
+          type: integer
+          example: 1
+        stockAvailable:
+          type: integer
+          example: 2
+        isLimitedEdition:
+          type: boolean
+          example: true
+
+    CreateProductRequest:
+      type: object
+      required: [code, name, category, costPrice, retailPrice, variants]
+      properties:
+        code:
+          type: string
+        name:
+          type: string
+        category:
+          type: string
+        costPrice:
+          type: number
+        retailPrice:
+          type: number
+        variants:
+          type: array
+          items:
+            type: object
+            required: [sku, size, colorName, stockPhysical]
+            properties:
+              sku:
+                type: string
+              size:
+                type: string
+              colorName:
+                type: string
+              stockPhysical:
+                type: integer
+
+    ConditionalBoxDetail:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        code:
+          type: string
+          example: "COND-2026-088"
+        customerId:
+          type: string
+          format: uuid
+        customerName:
+          type: string
+          example: "Dr. Guilherme Schramm"
+        curatorId:
+          type: string
+          format: uuid
+        status:
+          type: string
+          enum: [CRIADO, EM_PREPARACAO, ENVIADO, EM_TESTE, FINALIZADO, CANCELADO, VENCIDO]
+          example: EM_TESTE
+        sentAt:
+          type: string
+          format: date-time
+        deadlineDate:
+          type: string
+          format: date-time
+        durationDays:
+          type: integer
+          example: 3
+        totalAmount:
+          type: number
+          example: 1849.00
+        itemsCount:
+          type: integer
+          example: 4
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/ConditionalItemDetail'
+
+    ConditionalItemDetail:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        variantId:
+          type: string
+          format: uuid
+        productName:
+          type: string
+          example: "Camiseta Slim Algodão Egípcio Preto"
+        sku:
+          type: string
+          example: "RAV-CSL-01-M-BLK"
+        size:
+          type: string
+          example: "M"
+        unitPrice:
+          type: number
+          example: 280.00
+        status:
+          type: string
+          enum: [EM_EXPERIMENTACAO, COMPRADO, DEVOLVIDO]
+          example: EM_EXPERIMENTACAO
+        returnReason:
+          type: string
+          nullable: true
+
+    # ==========================================================================
+    # PAYLOAD CENTRAL: MONTAR SELEÇÃO E ENVIAR PARA O CLIENTE
+    # ==========================================================================
+    AssembleAndSendRequest:
+      type: object
+      description: Payload executado pelo Curador para validar estoque, reservar peças e despachar a mala VIP
+      required: [curatorId, items, testDurationDays]
+      properties:
+        curatorId:
+          type: string
+          format: uuid
+          description: ID do Curador responsável pela montagem
+          example: "1a2b3c4d-5e6f-7a8b-9c0d-1e2f3a4b5c6d"
+        deliveryMethod:
+          type: string
+          enum: [LEVA_E_TRAZ_VIP, RETIRADA_LOJA, CORREIOS_SEDEX]
+          default: LEVA_E_TRAZ_VIP
+          example: LEVA_E_TRAZ_VIP
+        testDurationDays:
+          type: integer
+          minimum: 1
+          maximum: 7
+          default: 3
+          description: Período acordado para experimentação (padrão Ravi's é 3 dias)
+          example: 3
+        dispatchNotes:
+          type: string
+          description: Orientações para a mala ou cartão manuscrito VIP
+          example: "Seleção montada com 4 peças em linho e modal sob medida para conferência médica."
+        items:
+          type: array
+          minItems: 1
+          maxItems: 12
+          description: Lista de variantes de peças selecionadas para envio na mala
+          items:
+            type: object
+            required: [variantId]
+            properties:
+              variantId:
+                type: string
+                format: uuid
+                description: ID da variante específica (tamanho/cor) a reservar
+                example: "4b87cf31-7e8e-4752-b88e-c1cfc14b3011"
+              specialPriceOverride:
+                type: number
+                nullable: true
+                description: Desconto especial ou ajuste de preço aprovado pelo curador
+                example: 489.00
+              stylingTip:
+                type: string
+                description: Dica do curador para o cliente combinar a peça
+                example: "Harmonize este tricô modal off-white com a calça chino tech chumbo."
+        notification:
+          type: object
+          description: Opções de disparo imediato no WhatsApp do cliente
+          properties:
+            sendWhatsAppImmediately:
+              type: boolean
+              default: true
+              example: true
+            customWhatsAppMessage:
+              type: string
+              nullable: true
+              description: Mensagem customizada; se omitida, usa o template aprovado Ravi's Curadoria
+              example: "Olá Dr. Guilherme! Acabamos de preparar sua seleção exclusiva Ravi's. Nosso motorista VIP levará até seu consultório hoje às 14h."
+
+    AssembleAndSendResponse:
+      type: object
+      properties:
+        boxId:
+          type: string
+          format: uuid
+          example: "9b1deb4d-3b7d-4bad-9bdd-2b0d7b3dcb6d"
+        code:
+          type: string
+          example: "COND-2026-088"
+        status:
+          type: string
+          example: "ENVIADO"
+        totalAmount:
+          type: number
+          example: 1849.00
+        itemsCount:
+          type: integer
+          example: 4
+        reservedItems:
+          type: array
+          items:
+            type: object
+            properties:
+              sku:
+                type: string
+                example: "RAV-TRC-03-M-OFF"
+              productName:
+                type: string
+                example: "Tricô Modal Canelado Off-White"
+              stockRemainingAvailable:
+                type: integer
+                example: 1
+        dispatchTrackingUrl:
+          type: string
+          format: uri
+          example: "https://ravispremium.com.br/condicional/COND-2026-088"
+        whatsAppDispatched:
+          type: boolean
+          example: true
+        whatsAppMessageId:
+          type: string
+          example: "wamid.HBgLNTU0Nzk5MTIzNDU2NxUCABEYEjA1"
+        scheduledReminderAt:
+          type: string
+          format: date-time
+          example: "2026-10-15T10:00:00-03:00"
+
+    RegisterReturnRequest:
+      type: object
+      required: [decisions]
+      properties:
+        decisions:
+          type: array
+          description: Decisão final para cada peça da mala
+          items:
+            type: object
+            required: [itemId, decision]
+            properties:
+              itemId:
+                type: string
+                format: uuid
+              decision:
+                type: string
+                enum: [COMPRADO, DEVOLVIDO]
+              returnReason:
+                type: string
+                nullable: true
+                example: "Ficou folgado na cintura, prefere caimento 40"
+        paymentMethod:
+          type: string
+          enum: [PIX, CARTAO_CREDITO, CARTAO_DEBITO, LINK_MERCADO_PAGO, LINK_STRIPE]
+          default: PIX
+        commissionCuratorRate:
+          type: number
+          default: 0.05
+          description: Taxa de comissão do curador (ex: 5% = 0.05)
+
+    RegisterReturnResponse:
+      type: object
+      properties:
+        boxId:
+          type: string
+          format: uuid
+        status:
+          type: string
+          example: "FINALIZADO"
+        purchasedCount:
+          type: integer
+          example: 2
+        returnedCount:
+          type: integer
+          example: 2
+        totalPurchasedAmount:
+          type: number
+          example: 769.00
+        generatedOrderId:
+          type: string
+          format: uuid
+          example: "6f5e4d3c-2b1a-0f9e-8d7c-6b5a4f3e2d1c"
+        curatorCommissionAmount:
+          type: number
+          example: 38.45
+        stockReconciledCount:
+          type: integer
+          example: 2
+          description: Peças devolvidas que retornaram imediatamente ao estoque disponível
+
+    OrderDetail:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        orderNumber:
+          type: string
+          example: "PED-2026-1042"
+        channel:
+          type: string
+          enum: [ONLINE_WHATSAPP, PDV_FISICO_CANOINHAS, ECOMMERCE]
+          example: ONLINE_WHATSAPP
+        status:
+          type: string
+          enum: [PENDENTE, PAGO, EM_SEPARACAO, ENVIADO, ENTREGUE, CANCELADO]
+          example: PAGO
+        customerName:
+          type: string
+          example: "Dr. Guilherme Schramm"
+        totalAmount:
+          type: number
+          example: 769.00
+        commissionAmount:
+          type: number
+          example: 38.45
+        createdAt:
+          type: string
+          format: date-time
+
+    CreateOrderRequest:
+      type: object
+      required: [customerId, channel, items, paymentMethod]
+      properties:
+        customerId:
+          type: string
+          format: uuid
+        sellerUserId:
+          type: string
+          format: uuid
+        channel:
+          type: string
+          enum: [ONLINE_WHATSAPP, PDV_FISICO_CANOINHAS, ECOMMERCE]
+        paymentMethod:
+          type: string
+          enum: [PIX, CARTAO_CREDITO, CARTAO_DEBITO, DINHEIRO, LINK_MERCADO_PAGO, LINK_STRIPE]
+        items:
+          type: array
+          items:
+            type: object
+            required: [variantId, quantity]
+            properties:
+              variantId:
+                type: string
+                format: uuid
+              quantity:
+                type: integer
+                example: 1
+
+    PaymentResponse:
+      type: object
+      properties:
+        paymentId:
+          type: string
+          format: uuid
+        status:
+          type: string
+          example: "PENDENTE"
+        pixQrCodeBase64:
+          type: string
+          nullable: true
+        pixCopyPasteKey:
+          type: string
+          nullable: true
+          example: "00020126580014br.gov.bcb.pix0136123e4567-e89b-12d3-a456-4266141740005204000053039865802BR5925RAVIS PREMIUM MENSWEAR6009CANOINHAS62070503***6304E8A1"
+        paymentLinkUrl:
+          type: string
+          format: uri
+          nullable: true
+          example: "https://mpago.la/pos/293810238"
+
+    ConversationDetail:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        channel:
+          type: string
+          enum: [WHATSAPP, INSTAGRAM, EMAIL]
+        customerName:
+          type: string
+          example: "Dr. Guilherme Schramm"
+        status:
+          type: string
+          enum: [ABERTO, EM_ATENDIMENTO, AGUARDANDO_CLIENTE, RESOLVIDO, ARQUIVADO]
+        lastMessagePreview:
+          type: string
+          example: "Perfeito, vou experimentar hoje à noite."
+        unreadCount:
+          type: integer
+          example: 0
+
+    MessageDetail:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        senderType:
+          type: string
+          enum: [CLIENT, CURATOR, BOT_AUTOMATION]
+        content:
+          type: string
+        status:
+          type: string
+          enum: [ENVIADO, ENTREGUE, LIDO, FALHA]
+        sentAt:
+          type: string
+          format: date-time
+
+    AutomationRule:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        triggerEvent:
+          type: string
+          example: "CONDICIONAL_3_DIAS_PENDENTE"
+        delayHours:
+          type: integer
+          example: 72
+        channel:
+          type: string
+          example: "WHATSAPP"
+        templateMessage:
+          type: string
+          example: "Olá {nome}! Tudo bem? Gostou das peças que enviamos na sua mala Ravi's?"
+        isActive:
+          type: boolean
+          example: true
+
+    CampaignDetail:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+          example: "Novidades Inverno Lã Merino - VIP Platinum"
+        status:
+          type: string
+          enum: [RASCUNHO, AGENDADA, EM_DISPARO, CONCLUIDA, CANCELADA]
+        targetCount:
+          type: integer
+          example: 45
+        sentCount:
+          type: integer
+          example: 45
+        deliveredCount:
+          type: integer
+          example: 44
+        responseCount:
+          type: integer
+          example: 18
+
+    CreateCampaignRequest:
+      type: object
+      required: [name, segmentFilter, templateMessage]
+      properties:
+        name:
+          type: string
+        segmentFilter:
+          type: object
+          properties:
+            sizes:
+              type: array
+              items:
+                type: string
+            tags:
+              type: array
+              items:
+                type: string
+            onlyOptIn:
+              type: boolean
+              default: true
+        templateMessage:
+          type: string
+        scheduledTime:
+          type: string
+          format: date-time
+
+    AnalyticsOverviewResponse:
+      type: object
+      properties:
+        grossRevenue:
+          type: number
+          example: 124500.00
+        netRevenue:
+          type: number
+          example: 118200.00
+        averageTicket:
+          type: number
+          example: 845.00
+        conditionalConversionRate:
+          type: number
+          example: 0.68
+          description: 68% de conversão de peças em malas condicionais
+        totalConditionalsSent:
+          type: integer
+          example: 52
+        totalConditionalsConverted:
+          type: integer
+          example: 44
+        averageResponseTimeMinutes:
+          type: number
+          example: 6.2
+        customerLtvAverage:
+          type: number
+          example: 6800.00
+
+    CuratorMetric:
+      type: object
+      properties:
+        curatorId:
+          type: string
+          format: uuid
+        curatorName:
+          type: string
+          example: "Mateus Curador"
+        boxesDispatched:
+          type: integer
+          example: 28
+        conversionRate:
+          type: number
+          example: 0.74
+        totalRevenueGenerated:
+          type: number
+          example: 48900.00
+        commissionEarned:
+          type: number
+          example: 2445.00
+
+    # Webhook Payloads
+    EvolutionApiWebhookPayload:
+      type: object
+      description: Payload enviado pela Evolution API v2 para eventos de WhatsApp
+      properties:
+        event:
+          type: string
+          example: "messages.upsert"
+        instance:
+          type: string
+          example: "ravis-canoinhas-matriz"
+        data:
+          type: object
+          properties:
+            key:
+              type: object
+              properties:
+                remoteJid:
+                  type: string
+                  example: "5547991234567@s.whatsapp.net"
+                fromMe:
+                  type: boolean
+                  example: false
+                id:
+                  type: string
+                  example: "3EB0C81F2874"
+            pushName:
+              type: string
+              example: "Dr. Guilherme Schramm"
+            message:
+              type: object
+              properties:
+                conversation:
+                  type: string
+                  example: "Gostei muito do tricô off-white! Vou ficar com ele e a calça chino."
+
+    InstagramWebhookPayload:
+      type: object
+      description: Payload enviado pela Meta Graph API para Direct Messages
+      properties:
+        object:
+          type: string
+          example: "instagram"
+        entry:
+          type: array
+          items:
+            type: object
+            properties:
+              id:
+                type: string
+                example: "17841400000000000"
+              messaging:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    sender:
+                      type: object
+                      properties:
+                        id:
+                          type: string
+                          example: "48291048201"
+                    message:
+                      type: object
+                      properties:
+                        mid:
+                          type: string
+                        text:
+                          type: string
+                          example: "Vocês tem aquele sobretudo em lã batida no tamanho M?"
+
+    PaymentGatewayWebhookPayload:
+      type: object
+      description: Payload de confirmação de pagamento do Mercado Pago ou Stripe
+      properties:
+        action:
+          type: string
+          example: "payment.updated"
+        type:
+          type: string
+          example: "payment"
+        data:
+          type: object
+          properties:
+            id:
+              type: string
+              example: "1234567890"
+            status:
+              type: string
+              example: "approved"
+            external_reference:
+              type: string
+              example: "PED-2026-1042"
+            transaction_amount:
+              type: number
+              example: 769.00
+            payment_method_id:
+              type: string
+              example: "pix"

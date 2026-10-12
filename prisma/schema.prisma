@@ -1,0 +1,750 @@
+// ============================================================================
+// RAVIS CRM - SCHEMA PRISMA ORM PARA POSTGRESQL
+// Sistema de Gestão de Moda Masculina Premium, Curadoria & Mala Condicional
+// Ravi's Premium Menswear - Canoinhas, SC
+// ============================================================================
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+// ============================================================================
+// ENUMS DE NEGÓCIO E CONTROLE DE ACESSO (RBAC)
+// ============================================================================
+
+enum Role {
+  ADMIN       // Acesso irrestrito a DRE, comissões, margens de custo e configurações
+  CURADOR     // Montagem de malas condicionais, curadoria de estilo e atendimento VIP
+  ATENDENTE   // Operação do PDV físico em Canoinhas, baixas e atendimento de balcão
+}
+
+enum FitPreference {
+  SLIM_FIT
+  REGULAR_FIT
+  ALFAIATARIA_MODERNA
+  LONGLINE
+  OVERSIZED
+}
+
+enum ConditionalStatus {
+  CRIADO            // Seleção inicial montada pelo curador no sistema
+  EM_PREPARACAO     // Peças reservadas e separadas na arara da boutique
+  ENVIADO           // Despachada para a residência/escritório do cliente
+  EM_TESTE          // Em posse do cliente durante o prazo de experimentação (48h-72h)
+  FINALIZADO        // Itens conferidos, baixas financeiras efetuadas e devoluções guardadas
+  CANCELADO         // Cancelado antes do despacho
+  VENCIDO           // Prazo de devolução expirado sem retorno do cliente
+}
+
+enum ConditionalItemStatus {
+  EM_EXPERIMENTACAO // Item sob teste na residência do cliente
+  COMPRADO          // Faturado e convertido em venda
+  DEVOLVIDO         // Retornado para reintegração ao estoque disponível
+}
+
+enum OrderChannel {
+  ONLINE_WHATSAPP       // Venda fechada via WhatsApp com link de pagamento
+  PDV_FISICO_CANOINHAS  // Venda balcão na loja física central em Canoinhas-SC
+  ECOMMERCE             // Pedido originado via catálogo online / e-commerce
+}
+
+enum OrderStatus {
+  PENDENTE
+  PAGO
+  EM_SEPARACAO
+  ENVIADO
+  ENTREGUE
+  CANCELADO
+}
+
+enum PaymentMethod {
+  PIX
+  CARTAO_CREDITO
+  CARTAO_DEBITO
+  DINHEIRO
+  LINK_MERCADO_PAGO
+  LINK_STRIPE
+}
+
+enum PaymentStatus {
+  PENDENTE
+  APROVADO
+  RECUSADO
+  ESTORNADO
+}
+
+enum Channel {
+  WHATSAPP
+  INSTAGRAM
+  EMAIL
+}
+
+enum ConversationStatus {
+  ABERTO
+  EM_ATENDIMENTO
+  AGUARDANDO_CLIENTE
+  RESOLVIDO
+  ARQUIVADO
+}
+
+enum SenderType {
+  CLIENT
+  CURATOR
+  BOT_AUTOMATION
+}
+
+enum MessageStatus {
+  ENVIADO
+  ENTREGUE
+  LIDO
+  FALHA
+}
+
+enum InteractionType {
+  WHATSAPP
+  INSTAGRAM
+  EMAIL
+  CONDICIONAL
+  VISITA_LOJA
+  PAGAMENTO
+  NOTA_CURADOR
+  CHAMADA_TELEFONICA
+}
+
+enum InventoryMovementType {
+  ENTRADA               // Recebimento de confecção / novo lote
+  SAIDA_VENDA           // Baixa definitiva de estoque por venda faturada
+  RESERVA_CONDICIONAL   // Bloqueio temporário para mala condicional em trânsito/teste
+  LIBERACAO_CONDICIONAL // Desbloqueio por devolução de mala sem compra
+  AJUSTE_BALANCO        // Correção de inventário físico
+  DEVOLUCAO             // Retorno formal ao estoque após conferência
+}
+
+enum CampaignStatus {
+  RASCUNHO
+  AGENDADA
+  EM_DISPARO
+  CONCLUIDA
+  CANCELADA
+}
+
+enum RecipientStatus {
+  FILA
+  ENVIADO
+  ENTREGUE
+  LIDO
+  RESPONDEU
+  CONVERTEU
+  FALHA
+  OPT_OUT
+}
+
+enum WishlistStatus {
+  DESEJADO    // Aguardando peça entrar no acervo
+  NOTIFICADO  // Cliente avisado via WhatsApp/Direct que o SKU chegou
+  DISPONIVEL  // Peça física em loja aguardando decisão
+  ATENDIDO    // Comprado ou incluído em mala condicional
+  EXPIRADO    // Cliente desistiu ou desatualizado
+}
+
+enum LgpdConsentStatus {
+  OPT_IN
+  PENDENTE
+  OPT_OUT
+}
+
+// ============================================================================
+// GESTÃO DE USUÁRIOS E EQUIPE (RBAC)
+// ============================================================================
+
+model User {
+  id              String         @id @default(uuid())
+  name            String
+  email           String         @unique
+  passwordHash    String?
+  phone           String?
+  role            Role           @default(CURATOR)
+  avatarUrl       String?
+  active          Boolean        @default(true)
+  commissionRate  Decimal        @default(0.05) @db.Decimal(5, 4) // Ex: 0.0500 = 5%
+
+  // Auditoria e Soft Delete
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
+  deletedAt       DateTime?
+
+  // Relacionamentos
+  assignedCustomers   Customer[]           @relation("CuratorCustomers")
+  conditionalBoxes    ConditionalBox[]     @relation("CuratorBoxes")
+  orders              Order[]              @relation("AttendantOrders")
+  conversations       Conversation[]       @relation("AssignedConversations")
+  interactions        Interaction[]        @relation("UserInteractions")
+  customerTags        CustomerTag[]        @relation("TaggedByUser")
+  inventoryMovements  InventoryMovement[]  @relation("MovementAuthor")
+  createdCampaigns    Campaign[]           @relation("CampaignCreator")
+
+  @@index([role])
+  @@index([email])
+}
+
+// ============================================================================
+// [CRM & SEGMENTAÇÃO] CLIENTE E PERFIL DE ESTILO 360°
+// As tabelas Customer e StyleProfile são o coração da hiper-personalização
+// da Ravi's, alimentando os disparos automáticos e a montagem das malas.
+// ============================================================================
+
+model Customer {
+  id                String            @id @default(uuid())
+  name              String
+  phone             String            @unique // Normalizado: +5547998241102
+  email             String?           @unique
+  instagram         String?           @unique // Ex: @drguilhermeschramm
+  city              String            @default("Canoinhas")
+  neighborhood      String?
+  address           String?
+  tier              String            @default("VIP Ouro") // VIP Platinum, VIP Ouro, VIP Black, etc.
+
+  // Conformidade LGPD & Restrições de Contato
+  lgpdConsent       LgpdConsentStatus @default(OPT_IN)
+  lgpdConsentDate   DateTime?
+  birthDate         DateTime?         // Suporta a Automação (3) de Aniversariante do Mês
+  lastPurchaseDate  DateTime?         // Suporta a Automação (4) de Reativação 60 dias
+
+  // Vínculo com Curador Responsável
+  curatorId         String?
+  curator           User?             @relation("CuratorCustomers", fields: [curatorId], references: [id], onDelete: SetNull)
+
+  // Auditoria e Soft Delete
+  active            Boolean           @default(true)
+  createdAt         DateTime          @default(now())
+  updatedAt         DateTime          @updatedAt
+  deletedAt         DateTime?
+
+  // Relacionamentos Estratégicos
+  styleProfile      StyleProfile?     // Perfil Antropométrico e DNA de Estilo (1:1)
+  tags              CustomerTag[]     // Segmentação Dinâmica por Tags (N:M)
+  conditionalBoxes  ConditionalBox[]  // Histórico de Malas Condicionais
+  orders            Order[]           // Histórico de Compras e Faturamento (LTV)
+  conversations     Conversation[]    // Threads no Inbox Unificado (WhatsApp/Insta/Email)
+  interactions      Interaction[]     // Linha do tempo cronológica 360°
+  wishlist          Wishlist[]        // Lista de desejos de peças em curadoria
+  campaignDeliveries CampaignRecipient[]
+
+  // Índices Otimizados para Busca Rápida no Atendimento e Identificação de Chamadas
+  @@index([phone])
+  @@index([instagram])
+  @@index([email])
+  @@index([city])
+  @@index([tier])
+  @@index([lastPurchaseDate])
+  @@index([birthDate])
+}
+
+model StyleProfile {
+  id                  String         @id @default(uuid())
+  customerId          String         @unique
+  customer            Customer       @relation(fields: [customerId], references: [id], onDelete: Cascade)
+
+  // Antropometria & Tamanhos
+  shirtSize           String         // P, M, G, GG, XG
+  pantsSize           String         // 38, 40, 42, 44, 46, 48
+  shoesSize           String?        // 39, 40, 41, 42, 43, 44
+  fitPreference       FitPreference  @default(SLIM_FIT)
+  heightCm            Int?
+  weightKg            Int?
+
+  // DNA Estético & Preferências (PostgreSQL Arrays para queries de segmentação ultra-rápidas)
+  colorPalette        String[]       @default([]) // ["Tons Terrosos", "Marinho", "Off-white"]
+  favoriteCategories  String[]       @default([]) // ["Camisas Linho", "Blazer Desestruturado"]
+  avoidItems          String[]       @default([]) // ["Estampas grandes", "Gola V profunda"]
+  lifestyle           String?        // "Médico cardiologista, jantares e eventos náuticos"
+  profession          String?        // "Médico Cardiologista"
+  curatorObservations String?        @db.Text    // Anotações particulares do curador
+
+  createdAt           DateTime       @default(now())
+  updatedAt           DateTime       @updatedAt
+
+  @@index([shirtSize])
+  @@index([pantsSize])
+  @@index([fitPreference])
+}
+
+// Tags de Segmentação Comportamental e de Estilo
+model Tag {
+  id          String        @id @default(uuid())
+  name        String        @unique // Ex: "Amante de Linho", "Ticket Alto", "VIP Médico"
+  category    String        @default("ESTILO") // ESTILO, COMPORTAMENTO, REGIAO, VIP
+  color       String        @default("#D4AF37") // Hexadecimal dourado/preto
+  description String?
+
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+
+  customers   CustomerTag[]
+
+  @@index([category])
+}
+
+model CustomerTag {
+  id          String    @id @default(uuid())
+  customerId  String
+  customer    Customer  @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  tagId       String
+  tag         Tag       @relation(fields: [tagId], references: [id], onDelete: Cascade)
+  
+  assignedById String?
+  assignedBy   User?    @relation("TaggedByUser", fields: [assignedById], references: [id], onDelete: SetNull)
+  assignedAt   DateTime @default(now())
+
+  @@unique([customerId, tagId])
+  @@index([customerId])
+  @@index([tagId])
+}
+
+// ============================================================================
+// CATÁLOGO, VARIANTES E CONTROLE DE ESTOQUE LIMITADO
+// Apoia o modelo de escassez da Ravi's (1 a 3 unidades por SKU)
+// ============================================================================
+
+model Product {
+  id            String           @id @default(uuid())
+  code          String           @unique // Ex: "RAV-LNH-01", "RAV-TRC-02"
+  name          String
+  slug          String           @unique
+  category      String           // Camiseta slim, Longline, Tricô, Sobretudo, Cachecol, Calça
+  description   String?          @db.Text
+  material      String?          // "100% Linho Francês", "Algodão Pima Peruano"
+  basePrice     Decimal          @db.Decimal(10, 2)
+  costPrice     Decimal          @db.Decimal(10, 2) // Margem protegida (apenas ADMIN)
+  photos        String[]         @default([]) // URLs importadas do Photoshoot do Pomelli
+  active        Boolean          @default(true)
+
+  // Auditoria e Soft Delete
+  createdAt     DateTime         @default(now())
+  updatedAt     DateTime         @updatedAt
+  deletedAt     DateTime?
+
+  variants      ProductVariant[]
+
+  @@index([category])
+  @@index([active])
+}
+
+model ProductVariant {
+  id                String             @id @default(uuid())
+  productId         String
+  product           Product            @relation(fields: [productId], references: [id], onDelete: Cascade)
+  sku               String             @unique // Ex: "RAV-LNH-01-M-AREIA"
+  size              String             // P, M, G, 40, 42, 44...
+  color             String             // Areia Natural, Preto Ônix, Fendi
+  colorHex          String?            // #E8D8C8
+  barcode           String?            @unique // EAN-13 para leitor de código de barras no app mobile
+
+  // Gestão de Estoque Físico e Reserva
+  stock             Int                @default(1) // Estoque total físico
+  reservedStock     Int                @default(0) // Reservado em malas condicionais ativas
+  minStockAlert     Int                @default(1) // Alerta de última unidade
+  isLimitedEdition  Boolean            @default(true) // 1-3 unidades exclusivas
+
+  createdAt         DateTime           @default(now())
+  updatedAt         DateTime           @updatedAt
+  deletedAt         DateTime?
+
+  // Relacionamentos
+  conditionalItems   ConditionalItem[]
+  orderItems         OrderItem[]
+  movements          InventoryMovement[]
+  wishlists          Wishlist[]
+
+  @@index([productId])
+  @@index([sku])
+  @@index([barcode])
+  @@index([size])
+  @@index([color])
+}
+
+// Kardex / Auditoria de Movimentações de Estoque
+model InventoryMovement {
+  id              String                 @id @default(uuid())
+  variantId       String
+  variant         ProductVariant         @relation(fields: [variantId], references: [id], onDelete: Cascade)
+  type            InventoryMovementType
+  quantity        Int                    // Quantidade movimentada (positiva ou negativa)
+  previousStock   Int
+  newStock        Int
+  reason          String?                // "Mala COND-2026-088 despachada", "Venda balcão Canoinhas"
+
+  // Vínculos Opcionais de Rastreabilidade
+  orderId         String?
+  order           Order?                 @relation(fields: [orderId], references: [id], onDelete: SetNull)
+  conditionalBoxId String?
+  conditionalBox  ConditionalBox?        @relation(fields: [conditionalBoxId], references: [id], onDelete: SetNull)
+
+  createdById     String?
+  createdBy       User?                  @relation("MovementAuthor", fields: [createdById], references: [id], onDelete: SetNull)
+  createdAt       DateTime               @default(now())
+
+  @@index([variantId])
+  @@index([type])
+  @@index([createdAt])
+}
+
+// ============================================================================
+// [MÓDULO DE CONDICIONAL - MALA EM CASA]
+// As tabelas ConditionalBox e ConditionalItem gerenciam o fluxo essencial
+// de prova em domicílio, trava de estoque atômica e conversão financeira.
+// ============================================================================
+
+model ConditionalBox {
+  id              String            @id @default(uuid())
+  boxCode         String            @unique // Ex: "COND-2026-088"
+  customerId      String
+  customer        Customer          @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  curatorId       String
+  curator         User              @relation("CuratorBoxes", fields: [curatorId], references: [id], onDelete: Restrict)
+  status          ConditionalStatus @default(CRIADO)
+
+  // Datas e Controle do Cronômetro de 48h-72h
+  dataEnvio       DateTime?
+  dataDevolucao   DateTime?         // Data em que o cliente devolveu/encerrou
+  prazoDias       Int               @default(3) // Padrão: 3 dias (72 horas)
+  dataLimite      DateTime?         // Calculado: dataEnvio + prazoDias
+
+  // Finanças da Mala
+  valorTotal      Decimal           @db.Decimal(10, 2) @default(0.00) // Soma do preço de todos os itens
+  valorComprado   Decimal           @db.Decimal(10, 2) @default(0.00) // Soma dos itens convertidos
+
+  // Logística e Transporte
+  deliveryType    String            @default("MOTORISTA_VIP") // MOTORISTA_VIP, RETIRADA_LOJA, CORREIOS_SEDEX
+  addressDelivery String?           // Endereço de entrega (consultório/residência)
+  trackingCode    String?
+  observation     String?           @db.Text
+  boxPhotoUrl     String?           // Foto da caixa lacrada feita pelo curador no App Mobile
+
+  // Auditoria e Soft Delete
+  createdAt       DateTime          @default(now())
+  updatedAt       DateTime          @updatedAt
+  deletedAt       DateTime?
+
+  // Relacionamentos
+  items           ConditionalItem[]
+  orders          Order[]           // Pedido gerado a partir dos itens comprados nesta mala
+  movements       InventoryMovement[]
+  payments        Payment[]
+
+  @@index([customerId])
+  @@index([curatorId])
+  @@index([status])
+  @@index([dataLimite])
+  @@index([createdAt])
+}
+
+model ConditionalItem {
+  id                String                @id @default(uuid())
+  conditionalBoxId  String
+  conditionalBox    ConditionalBox        @relation(fields: [conditionalBoxId], references: [id], onDelete: Cascade)
+  variantId         String
+  variant           ProductVariant        @relation(fields: [variantId], references: [id], onDelete: Restrict)
+
+  // Snapshot de Preço Histórico no Momento do Despacho
+  priceSnapshot     Decimal               @db.Decimal(10, 2)
+  status            ConditionalItemStatus @default(EM_EXPERIMENTACAO)
+
+  // Motivo de Devolução para Aprendizado Contínuo do Algoritmo de Recomendação
+  motivoDevolucao   String?               // "Ficou folgado na cintura", "Tom de cor muito claro"
+  feedbackRating    Int?                  // 1 a 5 estrelas
+  clientFeedback    String?
+
+  decidedAt         DateTime?             // Momento em que o cliente optou por comprar ou devolver
+  createdAt         DateTime              @default(now())
+  updatedAt         DateTime              @updatedAt
+
+  @@unique([conditionalBoxId, variantId])
+  @@index([conditionalBoxId])
+  @@index([variantId])
+  @@index([status])
+}
+
+// ============================================================================
+// PEDIDOS E FATURAMENTO (ONLINE WHATSAPP & PDV FÍSICO CANOINHAS)
+// ============================================================================
+
+model Order {
+  id                String          @id @default(uuid())
+  orderNumber       String          @unique // Ex: "PED-2026-1042"
+  customerId        String
+  customer          Customer        @relation(fields: [customerId], references: [id], onDelete: Restrict)
+  attendantId       String
+  attendant         User            @relation("AttendantOrders", fields: [attendantId], references: [id], onDelete: Restrict)
+
+  channel           OrderChannel    @default(ONLINE_WHATSAPP)
+  status            OrderStatus     @default(PENDENTE)
+
+  // Valores Financeiros
+  totalAmount       Decimal         @db.Decimal(10, 2)
+  discountAmount    Decimal         @db.Decimal(10, 2) @default(0.00)
+  commissionRate    Decimal         @db.Decimal(5, 4)  @default(0.05) // Taxa de comissão aplicada
+  commissionAmount  Decimal         @db.Decimal(10, 2) @default(0.00) // Valor da comissão do atendente
+
+  // Vínculo com Mala Condicional de Origem (quando a compra decorre da prova da mala)
+  conditionalBoxId  String?
+  conditionalBox    ConditionalBox? @relation(fields: [conditionalBoxId], references: [id], onDelete: SetNull)
+
+  paymentLink       String?         // Link Mercado Pago ou Stripe gerado para WhatsApp
+  notes             String?
+
+  // Auditoria e Soft Delete
+  createdAt         DateTime        @default(now())
+  updatedAt         DateTime        @updatedAt
+  deletedAt         DateTime?
+
+  // Relacionamentos
+  items             OrderItem[]
+  payments          Payment[]
+  movements         InventoryMovement[]
+
+  @@index([customerId])
+  @@index([attendantId])
+  @@index([status])
+  @@index([channel])
+  @@index([createdAt])
+}
+
+model OrderItem {
+  id          String         @id @default(uuid())
+  orderId     String
+  order       Order          @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  variantId   String
+  variant     ProductVariant @relation(fields: [variantId], references: [id], onDelete: Restrict)
+
+  quantity    Int            @default(1)
+  unitPrice   Decimal        @db.Decimal(10, 2)
+  discount    Decimal        @db.Decimal(10, 2) @default(0.00)
+  total       Decimal        @db.Decimal(10, 2)
+
+  createdAt   DateTime       @default(now())
+  updatedAt   DateTime       @updatedAt
+
+  @@index([orderId])
+  @@index([variantId])
+}
+
+model Payment {
+  id                String          @id @default(uuid())
+  orderId           String?
+  order             Order?          @relation(fields: [orderId], references: [id], onDelete: SetNull)
+  conditionalBoxId  String?
+  conditionalBox    ConditionalBox? @relation(fields: [conditionalBoxId], references: [id], onDelete: SetNull)
+
+  method            PaymentMethod   @default(PIX)
+  status            PaymentStatus   @default(PENDENTE)
+  amount            Decimal         @db.Decimal(10, 2)
+  installments      Int             @default(1)
+
+  transactionId     String?         // ID externo Mercado Pago / Stripe / NSU TEF
+  gatewayResponse   String?         @db.Text
+  paidAt            DateTime?
+
+  createdAt         DateTime        @default(now())
+  updatedAt         DateTime        @updatedAt
+
+  @@index([orderId])
+  @@index([conditionalBoxId])
+  @@index([status])
+  @@index([method])
+}
+
+// ============================================================================
+// ATENDIMENTO, INBOX OMNICHANNEL & TIMELINE DE INTERAÇÃO
+// Concentra WhatsApp Business, Instagram Direct e E-mail em fila única.
+// ============================================================================
+
+model Conversation {
+  id                     String             @id @default(uuid())
+  customerId             String
+  customer               Customer           @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  assignedUserId         String?
+  assignedUser           User?              @relation("AssignedConversations", fields: [assignedUserId], references: [id], onDelete: SetNull)
+
+  channel                Channel            @default(WHATSAPP)
+  status                 ConversationStatus @default(ABERTO)
+  unreadCount            Int                @default(0)
+  lastMessageAt          DateTime           @default(now())
+  externalConversationId String?            // ID remoto da sessão Meta / Evolution API
+
+  createdAt              DateTime           @default(now())
+  updatedAt              DateTime           @updatedAt
+  deletedAt              DateTime?
+
+  messages               Message[]
+
+  @@index([customerId])
+  @@index([assignedUserId])
+  @@index([channel])
+  @@index([status])
+  @@index([lastMessageAt])
+}
+
+model Message {
+  id              String        @id @default(uuid())
+  conversationId  String
+  conversation    Conversation  @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+
+  senderType      SenderType    @default(CURATOR)
+  channel         Channel       @default(WHATSAPP)
+  status          MessageStatus @default(ENVIADO)
+  content         String        @db.Text
+  mediaUrl        String?
+  templateUsed    String?       // Nome do template aprovado (ex: "QUAL_SEU_TAMANHO")
+  scheduledFor    DateTime?     // Agendamento para respeitar horário comercial
+  sentAt          DateTime      @default(now())
+
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+
+  @@index([conversationId])
+  @@index([status])
+  @@index([sentAt])
+}
+
+// Linha do Tempo Unificada do Cliente (Timeline 360°)
+model Interaction {
+  id          String          @id @default(uuid())
+  customerId  String
+  customer    Customer        @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  userId      String?
+  user        User?           @relation("UserInteractions", fields: [userId], references: [id], onDelete: SetNull)
+
+  type        InteractionType
+  title       String          // Ex: "Mala COND-2026-088 Despachada"
+  description String?         @db.Text
+  metadata    String?         @db.Text // JSON estruturado opcional
+  timestamp   DateTime        @default(now())
+
+  createdAt   DateTime        @default(now())
+
+  @@index([customerId])
+  @@index([type])
+  @@index([timestamp])
+}
+
+// ============================================================================
+// AUTOMAÇÕES DE MODA & CAMPANHAS SEGMENTADAS COM LGPD
+// Implementa as 5 automações vitais: Onboarding, Condicional D+3, Aniversário,
+// Reativação 60d e Notificação de Novos Drops por compatibilidade de estilo.
+// ============================================================================
+
+model Automation {
+  id              String        @id @default(uuid())
+  name            String        // Ex: "Condicional D+3: Lembrete de Prova"
+  key             String        @unique // "NOVO_CLIENTE", "CONDICIONAL_D3", "ANIVERSARIANTE", "REATIVACAO_60D", "NOVO_DROP"
+  triggerEvent    String        // Evento disparador do sistema
+  channel         Channel       @default(WHATSAPP)
+  active          Boolean       @default(true)
+  delayMinutes    Int           @default(0) // Atraso intencional ou janela comercial
+
+  conditions      String?       @db.Text // JSON: { "optIn": true, "daysSinceTrial": 3 }
+  actionConfig    String?       @db.Text // JSON: { "templateId": "tmpl-002", "curatorFallback": true }
+
+  executionsCount Int           @default(0)
+  successRate     Decimal       @db.Decimal(5, 2) @default(100.00)
+
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+  deletedAt       DateTime?
+
+  @@index([active])
+  @@index([key])
+}
+
+model Campaign {
+  id              String             @id @default(uuid())
+  title           String             // Ex: "Drop Linho Italiano - Exclusivo Tamanhos M/G"
+  description     String?
+  channel         Channel            @default(WHATSAPP)
+  status          CampaignStatus     @default(RASCUNHO)
+
+  scheduledFor    DateTime?
+  sentAt          DateTime?
+
+  // Critérios de Segmentação Inteligente
+  targetFilter    String             @db.Text // JSON: { "size": "M", "styleTags": ["Linho", "Social"], "tier": "VIP" }
+  templateMessage String             @db.Text
+
+  // Métricas de Desempenho e Conversão da Campanha
+  totalEligible   Int                @default(0)
+  totalSent       Int                @default(0)
+  totalDelivered  Int                @default(0)
+  totalRead       Int                @default(0)
+  totalReplied    Int                @default(0)
+  totalConverted  Int                @default(0)
+
+  createdById     String?
+  createdBy       User?              @relation("CampaignCreator", fields: [createdById], references: [id], onDelete: SetNull)
+
+  createdAt       DateTime           @default(now())
+  updatedAt       DateTime           @updatedAt
+  deletedAt       DateTime?
+
+  recipients      CampaignRecipient[]
+
+  @@index([status])
+  @@index([channel])
+  @@index([scheduledFor])
+}
+
+model CampaignRecipient {
+  id            String          @id @default(uuid())
+  campaignId    String
+  campaign      Campaign        @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  customerId    String
+  customer      Customer        @relation(fields: [customerId], references: [id], onDelete: Cascade)
+
+  channel       Channel         @default(WHATSAPP)
+  status        RecipientStatus @default(FILA)
+  sentAt        DateTime?
+  errorReason   String?
+
+  createdAt     DateTime        @default(now())
+
+  @@unique([campaignId, customerId])
+  @@index([campaignId])
+  @@index([customerId])
+  @@index([status])
+}
+
+// ============================================================================
+// LISTA DE DESEJO (WISHLIST) & CURADORIA DE ENCOMENDAS
+// Dispara aviso imediato quando a peça desejada entra no acervo da loja
+// ============================================================================
+
+model Wishlist {
+  id            String         @id @default(uuid())
+  customerId    String
+  customer      Customer       @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  variantId     String?
+  variant       ProductVariant? @relation(fields: [variantId], references: [id], onDelete: Cascade)
+
+  // Descrição livre caso o SKU ainda não exista no catálogo
+  desiredCategory String?       // Ex: "Sobretudo Lã Italiana", "Camisa Linho Marinho"
+  desiredSize     String?       // "M", "42"
+  desiredColor    String?       // "Chumbo", "Camel"
+
+  status        WishlistStatus @default(DESEJADO)
+  priority      Int            @default(1) // 1 a 5
+  notes         String?
+  notifiedAt    DateTime?
+
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+  deletedAt     DateTime?
+
+  @@index([customerId])
+  @@index([variantId])
+  @@index([status])
+}

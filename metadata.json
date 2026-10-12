@@ -1,0 +1,6 @@
+{
+  "name": "Ravis CRM - Curadoria & Condicional Masculino",
+  "description": "CRM vertical especializado para a Ravi's Premium (Canoinhas-SC): curadoria de moda masculina de edição limitada, gestão do ciclo de condicional, perfil 360° e inbox WhatsApp.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
